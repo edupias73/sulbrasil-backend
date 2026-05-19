@@ -1,0 +1,13 @@
+target/
+.idea/
+*.iml
+.classpath
+.project
+.settings/
+.vscode/launch.json
+
+# Senha local do MySQL (não commitar)
+src/main/resources/application-local.properties
+
+# Fotos y contenido subido por el admin
+data/

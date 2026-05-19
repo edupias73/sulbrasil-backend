@@ -1,0 +1,17 @@
+{
+  "secciones": {
+    "lampadas": {
+      "descripcion": "Lámpadas automotrices: halógenas, LED y incandescentes para faros y luces internas.",
+      "imagen": null
+    },
+    "alternadores": {
+      "descripcion": "Alternadores nuevos y reconstruidos. Amplio stock para camionetas y autos.",
+      "imagen": null
+    },
+    "arranques": {
+      "descripcion": "Motores de arranque para todas las marcas. Consulte aplicación por vehículo.",
+      "imagen": null
+    }
+  },
+  "productos": {}
+}

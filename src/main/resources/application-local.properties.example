@@ -1,0 +1,7 @@
+# Copie este arquivo para application-local.properties e preencha sua senha.
+# O application-local.properties não deve ir para o Git (senha local).
+
+spring.datasource.password=root
+
+# PIN del panel admin (cámbielo en producción)
+catalogo.admin.pin=1234
