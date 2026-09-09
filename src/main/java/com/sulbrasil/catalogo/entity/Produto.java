@@ -92,9 +92,16 @@ public class Produto {
         if (valor == null || valor.isBlank()) {
             return;
         }
+        String limpo = valor.toLowerCase().trim();
         if (!sb.isEmpty()) {
             sb.append(' ');
         }
-        sb.append(valor.toLowerCase().trim());
+        sb.append(limpo);
+
+        // Mágica: remove caracteres especiais para achar SB123 quando a peça for SB-123
+        String semEspecial = limpo.replaceAll("[^a-z0-9]", "");
+        if (!semEspecial.equals(limpo) && !semEspecial.isBlank()) {
+            sb.append(' ').append(semEspecial);
+        }
     }
 }

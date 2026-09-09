@@ -3,6 +3,11 @@ package com.sulbrasil.catalogo.service;
 import com.sulbrasil.catalogo.dto.ImportacaoResultado;
 import com.sulbrasil.catalogo.entity.Produto;
 import com.sulbrasil.catalogo.repository.ProdutoRepository;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.criteria.CriteriaBuilder;
+import jakarta.persistence.criteria.CriteriaQuery;
+import jakarta.persistence.criteria.Predicate;
+import jakarta.persistence.criteria.Root;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,24 +34,51 @@ public class ProdutoService {
     private static final int COL_CATEGORIA = 5;
 
     private final ProdutoRepository produtoRepository;
+    private final EntityManager entityManager; // Injetado para a busca inteligente
 
     @Transactional(readOnly = true)
     public List<Produto> buscar(String termo, String categoria) {
-        List<Produto> produtos;
-        boolean temTermo = termo != null && !termo.isBlank();
-        boolean temCategoria = categoria != null && !categoria.isBlank();
+        CriteriaBuilder cb = entityManager.getCriteriaBuilder();
+        CriteriaQuery<Produto> cq = cb.createQuery(Produto.class);
+        Root<Produto> produto = cq.from(Produto.class);
+        List<Predicate> predicates = new ArrayList<>();
 
-        if (temCategoria && temTermo) {
-            produtos = produtoRepository.findByCategoriaIgnoreCaseAndTermosBuscaContainingIgnoreCase(
-                    categoria.trim(), termo.trim());
-        } else if (temCategoria) {
-            produtos = produtoRepository.findByCategoriaIgnoreCaseOrderByNomePecaAsc(categoria.trim());
-        } else if (temTermo) {
-            produtos = produtoRepository.findByTermosBuscaContainingIgnoreCase(termo.trim());
-        } else {
-            produtos = List.of();
+        // 1. FILTRO DE CATEGORIA INTELIGENTE
+        if (categoria != null && !categoria.isBlank()) {
+            String catFormatada = categoria.toLowerCase().trim();
+            Predicate exata = cb.equal(cb.lower(produto.get("categoria")), catFormatada);
+
+            // Tenta achar pelo singular caso não tenha a categoria exata na coluna do banco
+            String termoCat = catFormatada;
+            if (termoCat.endsWith("es")) termoCat = termoCat.substring(0, termoCat.length() - 2);
+            else if (termoCat.endsWith("s")) termoCat = termoCat.substring(0, termoCat.length() - 1);
+
+            Predicate noTermo = cb.like(cb.lower(produto.get("termosBusca")), "%" + termoCat + "%");
+            predicates.add(cb.or(exata, noTermo));
         }
 
+        // 2. PESQUISA MULTI-PALAVRAS (Quebra a frase digitada)
+        if (termo != null && !termo.isBlank()) {
+            String buscaLimpa = termo.toLowerCase().trim().replaceAll("[^a-z0-9\\s]", "");
+            String[] palavras = buscaLimpa.split("\\s+");
+
+            for (String palavra : palavras) {
+                if (!palavra.isBlank()) {
+                    // Exige que CADA palavra digitada esteja presente no campo termosBusca
+                    predicates.add(cb.like(cb.lower(produto.get("termosBusca")), "%" + palavra + "%"));
+                }
+            }
+        }
+
+        // Retorna vazio se a barra de pesquisa estiver limpa e nenhuma categoria foi selecionada
+        if (predicates.isEmpty()) {
+            return List.of();
+        }
+
+        cq.where(predicates.toArray(new Predicate[0]));
+        cq.orderBy(cb.asc(produto.get("nomePeca")));
+
+        List<Produto> produtos = entityManager.createQuery(cq).getResultList();
         inicializarColecoes(produtos);
         return produtos;
     }
@@ -57,7 +89,6 @@ public class ProdutoService {
             p.getAplicacoesVeiculo().size();
         });
     }
-
 
     @Transactional
     public Produto salvarManual(Produto produto) {
