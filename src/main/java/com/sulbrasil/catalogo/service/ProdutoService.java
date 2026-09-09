@@ -34,7 +34,7 @@ public class ProdutoService {
     private static final int COL_CATEGORIA = 5;
 
     private final ProdutoRepository produtoRepository;
-    private final EntityManager entityManager; // Injetado para a busca inteligente
+    private final EntityManager entityManager;
 
     @Transactional(readOnly = true)
     public List<Produto> buscar(String termo, String categoria) {
@@ -43,34 +43,39 @@ public class ProdutoService {
         Root<Produto> produto = cq.from(Produto.class);
         List<Predicate> predicates = new ArrayList<>();
 
-        // 1. FILTRO DE CATEGORIA INTELIGENTE
+        // 1. FILTRO DE CATEGORIA (Seguro e Inteligente)
         if (categoria != null && !categoria.isBlank()) {
             String catFormatada = categoria.toLowerCase().trim();
             Predicate exata = cb.equal(cb.lower(produto.get("categoria")), catFormatada);
 
-            // Tenta achar pelo singular caso não tenha a categoria exata na coluna do banco
+            // Se o produto não tem categoria salva, procura pelo nome singular na descrição
             String termoCat = catFormatada;
             if (termoCat.endsWith("es")) termoCat = termoCat.substring(0, termoCat.length() - 2);
             else if (termoCat.endsWith("s")) termoCat = termoCat.substring(0, termoCat.length() - 1);
 
-            Predicate noTermo = cb.like(cb.lower(produto.get("termosBusca")), "%" + termoCat + "%");
-            predicates.add(cb.or(exata, noTermo));
+            Predicate noNome = cb.like(cb.lower(produto.get("nomePeca")), "%" + termoCat + "%");
+            predicates.add(cb.or(exata, noNome));
         }
 
-        // 2. PESQUISA MULTI-PALAVRAS (Quebra a frase digitada)
+        // 2. PESQUISA TIPO GOOGLE (Procura em Nome, Código e Marca)
         if (termo != null && !termo.isBlank()) {
-            String buscaLimpa = termo.toLowerCase().trim().replaceAll("[^a-z0-9\\s]", "");
+            String buscaLimpa = termo.toLowerCase().trim();
             String[] palavras = buscaLimpa.split("\\s+");
 
             for (String palavra : palavras) {
                 if (!palavra.isBlank()) {
-                    // Exige que CADA palavra digitada esteja presente no campo termosBusca
-                    predicates.add(cb.like(cb.lower(produto.get("termosBusca")), "%" + palavra + "%"));
+                    String pattern = "%" + palavra + "%";
+
+                    // A palavra digitada tem que estar EM PELO MENOS UM desses 3 campos
+                    Predicate noNome = cb.like(cb.lower(produto.get("nomePeca")), pattern);
+                    Predicate noCodigo = cb.like(cb.lower(produto.get("codigoInterno")), pattern);
+                    Predicate naMarca = cb.like(cb.lower(produto.get("marcaPrincipal")), pattern);
+
+                    predicates.add(cb.or(noNome, noCodigo, naMarca));
                 }
             }
         }
 
-        // Retorna vazio se a barra de pesquisa estiver limpa e nenhuma categoria foi selecionada
         if (predicates.isEmpty()) {
             return List.of();
         }
@@ -85,8 +90,8 @@ public class ProdutoService {
 
     private void inicializarColecoes(List<Produto> produtos) {
         produtos.forEach(p -> {
-            p.getCodigosCruzados().size();
-            p.getAplicacoesVeiculo().size();
+            if (p.getCodigosCruzados() != null) p.getCodigosCruzados().size();
+            if (p.getAplicacoesVeiculo() != null) p.getAplicacoesVeiculo().size();
         });
     }
 
@@ -139,7 +144,7 @@ public class ProdutoService {
                 try {
                     String[] colunas = linha.split(",", -1);
                     if (colunas.length < 5) {
-                        erros.add("Linha " + numeroLinha + ": esperadas ao menos 5 colunas (codigo_interno, nome_peca, marca_principal, preco, estoque, [categoria]).");
+                        erros.add("Linha " + numeroLinha + ": esperadas ao menos 5 colunas.");
                         continue;
                     }
 
