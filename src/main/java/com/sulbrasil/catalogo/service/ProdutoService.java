@@ -58,6 +58,26 @@ public class ProdutoService {
         });
     }
 
+
+    @Transactional
+    public Produto salvarManual(Produto produto) {
+        Optional<Produto> existente = produtoRepository.findByCodigoInterno(produto.getCodigoInterno());
+
+        if (existente.isPresent()) {
+            Produto p = existente.get();
+            p.setNomePeca(produto.getNomePeca());
+            p.setMarcaPrincipal(produto.getMarcaPrincipal());
+            p.setPreco(produto.getPreco());
+            p.setQuantidadeEstoque(produto.getQuantidadeEstoque());
+            if (produto.getCategoria() != null) {
+                p.setCategoria(produto.getCategoria());
+            }
+            return produtoRepository.save(p);
+        }
+
+        return produtoRepository.save(produto);
+    }
+
     @Transactional
     public ImportacaoResultado importarCsv(MultipartFile arquivo) throws IOException {
         if (arquivo == null || arquivo.isEmpty()) {
