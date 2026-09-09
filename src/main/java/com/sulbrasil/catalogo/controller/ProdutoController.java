@@ -40,4 +40,14 @@ public class ProdutoController {
                     .body(Map.of("erro", "Falha ao ler o arquivo CSV."));
         }
     }
+
+    @PostMapping("/manual")
+    public ResponseEntity<Produto> salvarManual(@RequestBody Produto produto) {
+        try {
+            Produto salvo = produtoService.salvarManual(produto);
+            return ResponseEntity.ok(salvo);
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().build();
+        }
+    }
 }
