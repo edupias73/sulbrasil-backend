@@ -107,9 +107,32 @@ public class ProdutoService {
         p.setMarcaPrincipal(produto.getMarcaPrincipal());
         p.setPreco(produto.getPreco() != null ? produto.getPreco() : BigDecimal.ZERO);
         p.setQuantidadeEstoque(produto.getQuantidadeEstoque() != null ? produto.getQuantidadeEstoque() : 0);
+        if (produto.getCategoria() != null) p.setCategoria(produto.getCategoria());
 
-        if (produto.getCategoria() != null) {
-            p.setCategoria(produto.getCategoria());
+        // SINCRONIZAR CÓDIGOS OEM
+        if (p.getCodigosCruzados() != null) {
+            p.getCodigosCruzados().clear();
+        } else {
+            p.setCodigosCruzados(new ArrayList<>());
+        }
+        if (produto.getCodigosCruzados() != null) {
+            produto.getCodigosCruzados().forEach(c -> {
+                c.setProduto(p);
+                p.getCodigosCruzados().add(c);
+            });
+        }
+
+        // SINCRONIZAR APLICACIONES
+        if (p.getAplicacoesVeiculo() != null) {
+            p.getAplicacoesVeiculo().clear();
+        } else {
+            p.setAplicacoesVeiculo(new ArrayList<>());
+        }
+        if (produto.getAplicacoesVeiculo() != null) {
+            produto.getAplicacoesVeiculo().forEach(a -> {
+                a.setProduto(p);
+                p.getAplicacoesVeiculo().add(a);
+            });
         }
 
         return produtoRepository.save(p);
