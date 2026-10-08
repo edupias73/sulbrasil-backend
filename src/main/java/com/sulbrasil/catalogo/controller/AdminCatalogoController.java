@@ -22,6 +22,7 @@ import java.util.Map;
 public class AdminCatalogoController {
 
     private final CatalogoContenidoService catalogoContenidoService;
+    private final com.sulbrasil.catalogo.service.ProdutoService produtoService;
 
     @Value("${catalogo.admin.pin:1234}")
     private String adminPin;
@@ -122,5 +123,20 @@ public class AdminCatalogoController {
 
     private ResponseEntity<Map<String, String>> naoAutorizado() {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("erro", "PIN incorrecto."));
+    }
+
+    @DeleteMapping("/productos/{codigoInterno}")
+    public ResponseEntity<?> deletarProducto(
+            @RequestHeader(value = "X-Admin-Pin", required = false) String pin,
+            @PathVariable String codigoInterno) {
+        if (!pinValido(pin)) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("erro", "PIN incorrecto."));
+        }
+        try {
+            produtoService.deletarPorCodigo(codigoInterno);
+            return ResponseEntity.ok(Map.of("mensaje", "Producto eliminado."));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("erro", "Error al eliminar."));
+        }
     }
 }

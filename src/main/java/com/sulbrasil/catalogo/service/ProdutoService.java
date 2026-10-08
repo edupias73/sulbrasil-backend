@@ -193,4 +193,10 @@ public class ProdutoService {
             return BigDecimal.ZERO;
         }
     }
+
+    @Transactional
+    public void deletarPorCodigo(String codigoInterno) {
+        produtoRepository.findByCodigoInterno(codigoInterno)
+                .ifPresent(produtoRepository::delete);
+    }
 }
