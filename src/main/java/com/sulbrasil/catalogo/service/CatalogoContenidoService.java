@@ -111,6 +111,9 @@ public class CatalogoContenidoService {
             if (dados.getDescripcion() != null) atual.setDescripcion(dados.getDescripcion());
             if (dados.getImagen() != null) atual.setImagen(dados.getImagen());
 
+            // NOVA INSTRUÇÃO PARA GUARDAR A GALERIA NO JSON
+            if (dados.getImagenes() != null) atual.setImagenes(dados.getImagenes());
+
             contenido.getProductos().put(codigo, atual);
             salvarContenido(contenido);
         } finally {
