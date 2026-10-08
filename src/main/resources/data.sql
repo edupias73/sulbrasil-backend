@@ -1,7 +1,3 @@
--- Massa de dados para testes do catálogo (linha pesada + leve)
-DELETE FROM aplicacoes_veiculo;
-DELETE FROM codigos_cruzados;
-DELETE FROM produtos;
 
 INSERT INTO produtos (id, codigo_interno, nome_peca, marca_principal, preco, quantidade_estoque, termos_busca) VALUES
 (1, 'SB-FO-SCAN440', 'Filtro de Oleo Lubrificante Motor', 'ZEN',

@@ -9,6 +9,7 @@ import jakarta.persistence.criteria.CriteriaQuery;
 import jakarta.persistence.criteria.Predicate;
 import jakarta.persistence.criteria.Root;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -22,6 +23,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class ProdutoService {
@@ -33,6 +35,8 @@ public class ProdutoService {
     private static final int COL_ESTOQUE = 4;
     private static final int COL_CATEGORIA = 5;
 
+    private static final int BATCH_SIZE = 100;
+
     private final ProdutoRepository produtoRepository;
     private final EntityManager entityManager;
 
@@ -43,12 +47,10 @@ public class ProdutoService {
         Root<Produto> produto = cq.from(Produto.class);
         List<Predicate> predicates = new ArrayList<>();
 
-        // 1. FILTRO DE CATEGORIA (Seguro e Inteligente)
         if (categoria != null && !categoria.isBlank()) {
             String catFormatada = categoria.toLowerCase().trim();
             Predicate exata = cb.equal(cb.lower(produto.get("categoria")), catFormatada);
 
-            // Se o produto não tem categoria salva, procura pelo nome singular na descrição
             String termoCat = catFormatada;
             if (termoCat.endsWith("es")) termoCat = termoCat.substring(0, termoCat.length() - 2);
             else if (termoCat.endsWith("s")) termoCat = termoCat.substring(0, termoCat.length() - 1);
@@ -57,33 +59,29 @@ public class ProdutoService {
             predicates.add(cb.or(exata, noNome));
         }
 
-        // 2. PESQUISA TIPO GOOGLE (Procura em Nome, Código e Marca)
         if (termo != null && !termo.isBlank()) {
             String buscaLimpa = termo.toLowerCase().trim();
             String[] palavras = buscaLimpa.split("\\s+");
 
             for (String palavra : palavras) {
-                if (!palavra.isBlank()) {
+                if (!palavra.isBlank() && palavra.length() > 1) { // Evita travamento por pesquisas de 1 letra
                     String pattern = "%" + palavra + "%";
-
-                    // A palavra digitada tem que estar EM PELO MENOS UM desses 3 campos
                     Predicate noNome = cb.like(cb.lower(produto.get("nomePeca")), pattern);
                     Predicate noCodigo = cb.like(cb.lower(produto.get("codigoInterno")), pattern);
                     Predicate naMarca = cb.like(cb.lower(produto.get("marcaPrincipal")), pattern);
-
                     predicates.add(cb.or(noNome, noCodigo, naMarca));
                 }
             }
         }
 
-        if (predicates.isEmpty()) {
-            return List.of();
-        }
+        if (predicates.isEmpty()) return List.of();
 
         cq.where(predicates.toArray(new Predicate[0]));
         cq.orderBy(cb.asc(produto.get("nomePeca")));
 
-        List<Produto> produtos = entityManager.createQuery(cq).getResultList();
+        List<Produto> produtos = entityManager.createQuery(cq)
+                .setMaxResults(200) // Proteção contra travamento do front-end
+                .getResultList();
         inicializarColecoes(produtos);
         return produtos;
     }
@@ -97,111 +95,91 @@ public class ProdutoService {
 
     @Transactional
     public Produto salvarManual(Produto produto) {
-        Optional<Produto> existente = produtoRepository.findByCodigoInterno(produto.getCodigoInterno());
-
-        if (existente.isPresent()) {
-            Produto p = existente.get();
-            p.setNomePeca(produto.getNomePeca());
-            p.setMarcaPrincipal(produto.getMarcaPrincipal());
-            p.setPreco(produto.getPreco());
-            p.setQuantidadeEstoque(produto.getQuantidadeEstoque());
-            if (produto.getCategoria() != null) {
-                p.setCategoria(produto.getCategoria());
-            }
-            return produtoRepository.save(p);
+        if (produto.getCodigoInterno() == null || produto.getCodigoInterno().isBlank()) {
+            throw new IllegalArgumentException("El código interno es obligatorio.");
         }
 
-        return produtoRepository.save(produto);
+        Produto p = produtoRepository.findByCodigoInterno(produto.getCodigoInterno())
+                .orElseGet(Produto::new);
+
+        p.setCodigoInterno(produto.getCodigoInterno().toUpperCase(java.util.Locale.ROOT));
+        p.setNomePeca(produto.getNomePeca());
+        p.setMarcaPrincipal(produto.getMarcaPrincipal());
+        p.setPreco(produto.getPreco() != null ? produto.getPreco() : BigDecimal.ZERO);
+        p.setQuantidadeEstoque(produto.getQuantidadeEstoque() != null ? produto.getQuantidadeEstoque() : 0);
+
+        if (produto.getCategoria() != null) {
+            p.setCategoria(produto.getCategoria());
+        }
+
+        return produtoRepository.save(p);
     }
 
     @Transactional
     public ImportacaoResultado importarCsv(MultipartFile arquivo) throws IOException {
         if (arquivo == null || arquivo.isEmpty()) {
-            throw new IllegalArgumentException("Arquivo CSV não enviado ou vazio.");
+            throw new IllegalArgumentException("Archivo CSV no enviado o vacio.");
         }
 
         int importados = 0;
         int atualizados = 0;
         List<String> erros = new ArrayList<>();
 
-        try (BufferedReader reader = new BufferedReader(
-                new InputStreamReader(arquivo.getInputStream(), StandardCharsets.UTF_8))) {
-
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(arquivo.getInputStream(), StandardCharsets.UTF_8))) {
             String linha;
             int numeroLinha = 0;
 
             while ((linha = reader.readLine()) != null) {
                 numeroLinha++;
                 linha = linha.trim();
-                if (linha.isEmpty()) {
-                    continue;
-                }
 
-                if (numeroLinha == 1 && isCabecalho(linha)) {
-                    continue;
-                }
+                if (linha.isEmpty() || (numeroLinha == 1 && isCabecalho(linha))) continue;
 
                 try {
                     String[] colunas = linha.split(",", -1);
                     if (colunas.length < 5) {
-                        erros.add("Linha " + numeroLinha + ": esperadas ao menos 5 colunas.");
+                        erros.add("Línea " + numeroLinha + ": faltan columnas.");
                         continue;
                     }
 
-                    String codigoInterno = colunas[COL_CODIGO].trim();
+                    String codigoInterno = colunas[COL_CODIGO].trim().toUpperCase();
                     String nomePeca = colunas[COL_NOME].trim();
-                    String marcaPrincipal = colunas[COL_MARCA].trim();
-                    BigDecimal preco = parsePreco(colunas[COL_PRECO].trim());
-                    Integer estoque = Integer.parseInt(colunas[COL_ESTOQUE].trim());
-                    String categoria = colunas.length > COL_CATEGORIA ? colunas[COL_CATEGORIA].trim() : null;
-                    if (categoria != null && categoria.isBlank()) {
-                        categoria = null;
-                    }
 
                     if (codigoInterno.isBlank() || nomePeca.isBlank()) {
-                        erros.add("Linha " + numeroLinha + ": codigo_interno e nome_peca são obrigatórios.");
+                        erros.add("Línea " + numeroLinha + ": codigo_interno y nome_peca son obligatorios.");
                         continue;
                     }
 
-                    Optional<Produto> existente = produtoRepository.findByCodigoInterno(codigoInterno);
-                    Produto produto;
+                    Produto produto = produtoRepository.findByCodigoInterno(codigoInterno)
+                            .orElseGet(() -> Produto.builder().codigoInterno(codigoInterno).build());
 
-                    if (existente.isPresent()) {
-                        produto = existente.get();
-                        produto.setNomePeca(nomePeca);
-                        produto.setMarcaPrincipal(marcaPrincipal);
-                        produto.setPreco(preco);
-                        produto.setQuantidadeEstoque(estoque);
-                        if (categoria != null) {
-                            produto.setCategoria(categoria);
-                        }
-                        atualizados++;
-                    } else {
-                        produto = Produto.builder()
-                                .codigoInterno(codigoInterno)
-                                .nomePeca(nomePeca)
-                                .marcaPrincipal(marcaPrincipal)
-                                .preco(preco)
-                                .quantidadeEstoque(estoque)
-                                .categoria(categoria)
-                                .build();
-                        importados++;
+                    boolean isNovo = produto.getId() == null;
+
+                    produto.setNomePeca(nomePeca);
+                    produto.setMarcaPrincipal(colunas[COL_MARCA].trim());
+                    produto.setPreco(parsePreco(colunas[COL_PRECO].trim()));
+                    produto.setQuantidadeEstoque(Integer.parseInt(colunas[COL_ESTOQUE].trim()));
+
+                    if (colunas.length > COL_CATEGORIA && !colunas[COL_CATEGORIA].isBlank()) {
+                        produto.setCategoria(colunas[COL_CATEGORIA].trim());
                     }
 
                     produtoRepository.save(produto);
-                } catch (NumberFormatException e) {
-                    erros.add("Linha " + numeroLinha + ": preço ou estoque inválido.");
+
+                    if (isNovo) importados++; else atualizados++;
+
+                    // Prevenção de OutOfMemory em arquivos gigantes
+                    if ((importados + atualizados) % BATCH_SIZE == 0) {
+                        entityManager.flush();
+                        entityManager.clear();
+                    }
+
                 } catch (Exception e) {
-                    erros.add("Linha " + numeroLinha + ": " + e.getMessage());
+                    erros.add("Línea " + numeroLinha + ": Error de formato (" + e.getMessage() + ")");
                 }
             }
         }
-
-        return ImportacaoResultado.builder()
-                .importados(importados)
-                .atualizados(atualizados)
-                .erros(erros)
-                .build();
+        return ImportacaoResultado.builder().importados(importados).atualizados(atualizados).erros(erros).build();
     }
 
     private boolean isCabecalho(String linha) {
@@ -209,6 +187,10 @@ public class ProdutoService {
     }
 
     private BigDecimal parsePreco(String valor) {
-        return new BigDecimal(valor.replace(",", "."));
+        try {
+            return new BigDecimal(valor.replace(",", "."));
+        } catch (NumberFormatException e) {
+            return BigDecimal.ZERO;
+        }
     }
 }
