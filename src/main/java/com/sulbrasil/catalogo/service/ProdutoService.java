@@ -113,7 +113,11 @@ public class ProdutoService {
         p.setMarcaPrincipal(produto.getMarcaPrincipal());
         p.setPreco(produto.getPreco() != null ? produto.getPreco() : BigDecimal.ZERO);
         p.setQuantidadeEstoque(produto.getQuantidadeEstoque() != null ? produto.getQuantidadeEstoque() : 0);
+
         if (produto.getCategoria() != null) p.setCategoria(produto.getCategoria());
+
+        // AQUI: Salva a descrição no banco para a pesquisa encontrar "scania", etc.
+        p.setDescripcion(produto.getDescripcion());
 
         // SINCRONIZAR CÓDIGOS OEM
         if (p.getCodigosCruzados() != null) {
@@ -141,8 +145,7 @@ public class ProdutoService {
             });
         }
 
-        // --- A SOLUÇÃO ESTÁ AQUI ---
-        // Obriga o sistema a varrer as tabelas e atualizar os termos de busca com os novos códigos!
+        // AQUI: Força o banco de dados a mastigar os novos códigos e adicionar na pesquisa!
         p.setTermosBusca(p.montarTermosBusca());
 
         return produtoRepository.save(p);
