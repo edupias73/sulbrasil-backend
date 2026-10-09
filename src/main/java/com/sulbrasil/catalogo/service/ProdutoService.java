@@ -141,6 +141,10 @@ public class ProdutoService {
             });
         }
 
+        // --- A SOLUÇÃO ESTÁ AQUI ---
+        // Obriga o sistema a varrer as tabelas e atualizar os termos de busca com os novos códigos!
+        p.setTermosBusca(p.montarTermosBusca());
+
         return produtoRepository.save(p);
     }
 
