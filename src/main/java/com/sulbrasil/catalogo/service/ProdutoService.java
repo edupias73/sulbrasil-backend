@@ -47,6 +47,7 @@ public class ProdutoService {
         Root<Produto> produto = cq.from(Produto.class);
         List<Predicate> predicates = new ArrayList<>();
 
+        // 1. FILTRO DE CATEGORIA
         if (categoria != null && !categoria.isBlank()) {
             String catFormatada = categoria.toLowerCase().trim();
             Predicate exata = cb.equal(cb.lower(produto.get("categoria")), catFormatada);
@@ -59,17 +60,22 @@ public class ProdutoService {
             predicates.add(cb.or(exata, noNome));
         }
 
+        // 2. PESQUISA GLOBAL (Nome, Código Interno, Marca, Códigos OEM e Aplicações)
         if (termo != null && !termo.isBlank()) {
             String buscaLimpa = termo.toLowerCase().trim();
             String[] palavras = buscaLimpa.split("\\s+");
 
             for (String palavra : palavras) {
-                if (!palavra.isBlank() && palavra.length() > 1) { // Evita travamento por pesquisas de 1 letra
+                if (!palavra.isBlank() && palavra.length() > 1) {
                     String pattern = "%" + palavra + "%";
                     Predicate noNome = cb.like(cb.lower(produto.get("nomePeca")), pattern);
                     Predicate noCodigo = cb.like(cb.lower(produto.get("codigoInterno")), pattern);
                     Predicate naMarca = cb.like(cb.lower(produto.get("marcaPrincipal")), pattern);
-                    predicates.add(cb.or(noNome, noCodigo, naMarca));
+
+                    // AQUI ESTÁ A CORREÇÃO: Pesquisa na coluna que guarda os Códigos OEM e Aplicações
+                    Predicate nosTermos = cb.like(cb.lower(produto.get("termosBusca")), pattern);
+
+                    predicates.add(cb.or(noNome, noCodigo, naMarca, nosTermos));
                 }
             }
         }
@@ -80,7 +86,7 @@ public class ProdutoService {
         cq.orderBy(cb.asc(produto.get("nomePeca")));
 
         List<Produto> produtos = entityManager.createQuery(cq)
-                .setMaxResults(200) // Proteção contra travamento do front-end
+                .setMaxResults(200) // Proteção contra travamento
                 .getResultList();
         inicializarColecoes(produtos);
         return produtos;
