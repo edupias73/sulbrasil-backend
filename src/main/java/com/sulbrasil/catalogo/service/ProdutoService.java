@@ -4,12 +4,12 @@ import com.sulbrasil.catalogo.dto.ImportacaoResultado;
 import com.sulbrasil.catalogo.entity.Produto;
 import com.sulbrasil.catalogo.repository.ProdutoRepository;
 import jakarta.persistence.EntityManager;
-import jakarta.persistence.criteria.CriteriaBuilder;
-import jakarta.persistence.criteria.CriteriaQuery;
 import jakarta.persistence.criteria.Predicate;
-import jakarta.persistence.criteria.Root;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -21,7 +21,6 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 
 @Slf4j
 @Service
@@ -40,65 +39,72 @@ public class ProdutoService {
     private final ProdutoRepository produtoRepository;
     private final EntityManager entityManager;
 
+    // 1. MOTOR DE BUSCA PAGINADO E OTIMIZADO PARA 1 MILHÃO DE ITENS
     @Transactional(readOnly = true)
-    public List<Produto> buscar(String termo, String categoria) {
-        CriteriaBuilder cb = entityManager.getCriteriaBuilder();
-        CriteriaQuery<Produto> cq = cb.createQuery(Produto.class);
-        Root<Produto> produto = cq.from(Produto.class);
-        List<Predicate> predicates = new ArrayList<>();
+    public Page<Produto> buscarPaginado(String termo, String categoria, Pageable pageable) {
+        Specification<Produto> spec = (root, query, cb) -> {
+            List<Predicate> predicates = new ArrayList<>();
 
-        // 1. FILTRO DE CATEGORIA
-        if (categoria != null && !categoria.isBlank()) {
-            String catFormatada = categoria.toLowerCase().trim();
-            Predicate exata = cb.equal(cb.lower(produto.get("categoria")), catFormatada);
+            // Filtro de Categoria
+            if (categoria != null && !categoria.isBlank()) {
+                String catFormatada = categoria.toLowerCase().trim();
+                Predicate exata = cb.equal(cb.lower(root.get("categoria").as(String.class)), catFormatada);
 
-            String termoCat = catFormatada;
-            if (termoCat.endsWith("es")) termoCat = termoCat.substring(0, termoCat.length() - 2);
-            else if (termoCat.endsWith("s")) termoCat = termoCat.substring(0, termoCat.length() - 1);
+                String termoCat = catFormatada;
+                if (termoCat.endsWith("es")) termoCat = termoCat.substring(0, termoCat.length() - 2);
+                else if (termoCat.endsWith("s")) termoCat = termoCat.substring(0, termoCat.length() - 1);
 
-            Predicate noNome = cb.like(cb.lower(produto.get("nomePeca")), "%" + termoCat + "%");
-            predicates.add(cb.or(exata, noNome));
-        }
+                Predicate noNome = cb.like(cb.lower(root.get("nomePeca").as(String.class)), "%" + termoCat + "%");
+                predicates.add(cb.or(exata, noNome));
+            }
 
-        // 2. PESQUISA GLOBAL (Nome, Código Interno, Marca, Códigos OEM e Aplicações)
-        if (termo != null && !termo.isBlank()) {
-            String buscaLimpa = termo.toLowerCase().trim();
-            String[] palavras = buscaLimpa.split("\\s+");
+            // Pesquisa Global (Nome, Código Interno, Marca, Códigos OEM e Aplicações)
+            if (termo != null && !termo.isBlank()) {
+                String buscaLimpa = termo.toLowerCase().trim();
+                String[] palavras = buscaLimpa.split("\\s+");
 
-            for (String palavra : palavras) {
-                if (!palavra.isBlank() && palavra.length() > 1) {
-                    String pattern = "%" + palavra + "%";
-                    Predicate noNome = cb.like(cb.lower(produto.get("nomePeca")), pattern);
-                    Predicate noCodigo = cb.like(cb.lower(produto.get("codigoInterno")), pattern);
-                    Predicate naMarca = cb.like(cb.lower(produto.get("marcaPrincipal")), pattern);
+                for (String palavra : palavras) {
+                    if (!palavra.isBlank() && palavra.length() > 1) {
+                        String pattern = "%" + palavra + "%";
+                        Predicate noNome = cb.like(cb.lower(root.get("nomePeca").as(String.class)), pattern);
+                        Predicate noCodigo = cb.like(cb.lower(root.get("codigoInterno").as(String.class)), pattern);
+                        Predicate naMarca = cb.like(cb.lower(root.get("marcaPrincipal").as(String.class)), pattern);
+                        Predicate nosTermos = cb.like(cb.lower(root.get("termosBusca").as(String.class)), pattern);
 
-                    // AQUI ESTÁ A CORREÇÃO: Pesquisa na coluna que guarda os Códigos OEM e Aplicações
-                    Predicate nosTermos = cb.like(cb.lower(produto.get("termosBusca")), pattern);
-
-                    predicates.add(cb.or(noNome, noCodigo, naMarca, nosTermos));
+                        predicates.add(cb.or(noNome, noCodigo, naMarca, nosTermos));
+                    }
                 }
             }
+
+            return predicates.isEmpty() ? cb.conjunction() : cb.and(predicates.toArray(new Predicate[0]));
+        };
+
+        return produtoRepository.findAll(spec, pageable);
+    }
+
+    // 2. ATUALIZAR DESCRIÇÃO E GALERIA DIRETO NO MYSQL
+    @Transactional
+    public void atualizarDetalhes(String codigoInterno, String descripcion, String urlImagen, List<String> galeriaUrls) {
+        Produto p = produtoRepository.findByCodigoInterno(codigoInterno)
+                .orElseThrow(() -> new IllegalArgumentException("Pieza no encontrada: " + codigoInterno));
+
+        if (descripcion != null) p.setDescripcion(descripcion);
+        if (urlImagen != null) p.setUrlImagen(urlImagen);
+
+        if (galeriaUrls != null) {
+            if (p.getGaleria() == null) {
+                p.setGaleria(new ArrayList<>());
+            } else {
+                p.getGaleria().clear();
+            }
+            p.getGaleria().addAll(galeriaUrls);
         }
 
-        if (predicates.isEmpty()) return List.of();
-
-        cq.where(predicates.toArray(new Predicate[0]));
-        cq.orderBy(cb.asc(produto.get("nomePeca")));
-
-        List<Produto> produtos = entityManager.createQuery(cq)
-                .setMaxResults(200) // Proteção contra travamento
-                .getResultList();
-        inicializarColecoes(produtos);
-        return produtos;
+        p.setTermosBusca(p.montarTermosBusca());
+        produtoRepository.save(p);
     }
 
-    private void inicializarColecoes(List<Produto> produtos) {
-        produtos.forEach(p -> {
-            if (p.getCodigosCruzados() != null) p.getCodigosCruzados().size();
-            if (p.getAplicacoesVeiculo() != null) p.getAplicacoesVeiculo().size();
-        });
-    }
-
+    // 3. SALVAMENTO MANUAL PELO PAINEL ADMIN
     @Transactional
     public Produto salvarManual(Produto produto) {
         if (produto.getCodigoInterno() == null || produto.getCodigoInterno().isBlank()) {
@@ -115,11 +121,9 @@ public class ProdutoService {
         p.setQuantidadeEstoque(produto.getQuantidadeEstoque() != null ? produto.getQuantidadeEstoque() : 0);
 
         if (produto.getCategoria() != null) p.setCategoria(produto.getCategoria());
+        if (produto.getDescripcion() != null) p.setDescripcion(produto.getDescripcion());
 
-        // AQUI: Salva a descrição no banco para a pesquisa encontrar "scania", etc.
-        p.setDescripcion(produto.getDescripcion());
-
-        // SINCRONIZAR CÓDIGOS OEM
+        // Sincronizar Códigos OEM
         if (p.getCodigosCruzados() != null) {
             p.getCodigosCruzados().clear();
         } else {
@@ -132,7 +136,7 @@ public class ProdutoService {
             });
         }
 
-        // SINCRONIZAR APLICACIONES
+        // Sincronizar Aplicações
         if (p.getAplicacoesVeiculo() != null) {
             p.getAplicacoesVeiculo().clear();
         } else {
@@ -145,12 +149,11 @@ public class ProdutoService {
             });
         }
 
-        // AQUI: Força o banco de dados a mastigar os novos códigos e adicionar na pesquisa!
         p.setTermosBusca(p.montarTermosBusca());
-
         return produtoRepository.save(p);
     }
 
+    // 4. IMPORTAÇÃO EM MASSA VIA EXCEL (CSV)
     @Transactional
     public ImportacaoResultado importarCsv(MultipartFile arquivo) throws IOException {
         if (arquivo == null || arquivo.isEmpty()) {
@@ -186,8 +189,13 @@ public class ProdutoService {
                         continue;
                     }
 
+                    // CORREÇÃO AQUI: Instanciação 100% segura sem usar o .builder()
                     Produto produto = produtoRepository.findByCodigoInterno(codigoInterno)
-                            .orElseGet(() -> Produto.builder().codigoInterno(codigoInterno).build());
+                            .orElseGet(() -> {
+                                Produto novo = new Produto();
+                                novo.setCodigoInterno(codigoInterno);
+                                return novo;
+                            });
 
                     boolean isNovo = produto.getId() == null;
 
@@ -200,11 +208,12 @@ public class ProdutoService {
                         produto.setCategoria(colunas[COL_CATEGORIA].trim());
                     }
 
+                    produto.setTermosBusca(produto.montarTermosBusca());
                     produtoRepository.save(produto);
 
                     if (isNovo) importados++; else atualizados++;
 
-                    // Prevenção de OutOfMemory em arquivos gigantes
+                    // Limpa a RAM a cada 100 peças processadas (Evita OutOfMemory)
                     if ((importados + atualizados) % BATCH_SIZE == 0) {
                         entityManager.flush();
                         entityManager.clear();
@@ -215,6 +224,8 @@ public class ProdutoService {
                 }
             }
         }
+
+        // Se a sua classe ImportacaoResultado também não tiver @Builder, troque essa linha por um 'new ImportacaoResultado(...)'
         return ImportacaoResultado.builder().importados(importados).atualizados(atualizados).erros(erros).build();
     }
 
@@ -230,6 +241,7 @@ public class ProdutoService {
         }
     }
 
+    // 5. EXCLUSÃO DE PRODUTO
     @Transactional
     public void deletarPorCodigo(String codigoInterno) {
         produtoRepository.findByCodigoInterno(codigoInterno)

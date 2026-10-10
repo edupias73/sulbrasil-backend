@@ -1,53 +1,36 @@
 package com.sulbrasil.catalogo.controller;
 
-import com.sulbrasil.catalogo.dto.ImportacaoResultado;
 import com.sulbrasil.catalogo.entity.Produto;
 import com.sulbrasil.catalogo.service.ProdutoService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.multipart.MultipartFile;
-
-import java.io.IOException;
-import java.util.List;
-import java.util.Map;
 
 @RestController
 @RequestMapping("/api/produtos")
 @RequiredArgsConstructor
+@CrossOrigin(origins = "*")
 public class ProdutoController {
 
     private final ProdutoService produtoService;
 
+    // A loja agora pede por "páginas" e o backend só envia 20 peças de cada vez
     @GetMapping("/buscar")
-    public ResponseEntity<List<Produto>> buscar(
+    public ResponseEntity<Page<Produto>> buscar(
             @RequestParam(value = "q", required = false, defaultValue = "") String termo,
-            @RequestParam(value = "categoria", required = false) String categoria) {
-        return ResponseEntity.ok(produtoService.buscar(termo, categoria));
-    }
+            @RequestParam(value = "categoria", required = false) String categoria,
+            @RequestParam(value = "page", defaultValue = "0") int page,
+            @RequestParam(value = "size", defaultValue = "20") int size) {
 
-    @PostMapping(value = "/importar", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ResponseEntity<?> importar(@RequestParam("arquivo") MultipartFile arquivo) {
-        try {
-            ImportacaoResultado resultado = produtoService.importarCsv(arquivo);
-            return ResponseEntity.ok(resultado);
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().body(Map.of("erro", e.getMessage()));
-        } catch (IOException e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("erro", "Falha ao ler o arquivo CSV."));
-        }
+        PageRequest pageRequest = PageRequest.of(page, size, Sort.by("nomePeca").ascending());
+        return ResponseEntity.ok(produtoService.buscarPaginado(termo, categoria, pageRequest));
     }
 
     @PostMapping("/manual")
     public ResponseEntity<Produto> salvarManual(@RequestBody Produto produto) {
-        try {
-            Produto salvo = produtoService.salvarManual(produto);
-            return ResponseEntity.ok(salvo);
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().build();
-        }
+        return ResponseEntity.ok(produtoService.salvarManual(produto));
     }
 }

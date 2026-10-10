@@ -45,8 +45,15 @@ public class Produto {
     @Column(columnDefinition = "TEXT")
     private String descripcion;
 
+
     @Column(name = "url_imagen", length = 500)
     private String urlImagen;
+
+    // --- NOVA RELAÇÃO: GALERIA DE FOTOS NO MYSQL ---
+    @ElementCollection
+    @CollectionTable(name = "produto_imagens", joinColumns = @JoinColumn(name = "produto_id"))
+    @Column(name = "url_imagem")
+    private List<String> galeria = new ArrayList<>();
 
     @OneToMany(mappedBy = "produto", cascade = CascadeType.ALL, orphanRemoval = true)
     @JsonManagedReference
