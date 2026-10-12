@@ -66,18 +66,20 @@ public class AdminCatalogoController {
         }
     }
 
-    @PostMapping("/upload/{tipo}/{id}")
+    @PostMapping("/upload")
     public ResponseEntity<?> uploadImagem(
             @RequestHeader(value = "X-Admin-Pin", required = false) String pin,
-            @PathVariable String tipo,
-            @PathVariable String id,
+            @RequestParam("tipo") String tipo,
+            @RequestParam("id") String id,
             @RequestParam("archivo") MultipartFile arquivo) {
+
         if (!pinValido(pin)) return naoAutorizado();
+
         try {
             String url = catalogoContenidoService.salvarImagem(tipo, id, arquivo);
             return ResponseEntity.ok(Map.of("url", url));
-        } catch (IOException e) {
-            return ResponseEntity.internalServerError().body(Map.of("erro", "Error al subir la imagen."));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("erro", "Error al subir la imagen: " + e.getMessage()));
         }
     }
 
